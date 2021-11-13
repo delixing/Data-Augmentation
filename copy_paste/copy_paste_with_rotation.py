@@ -2,6 +2,9 @@ import numpy as np
 from PIL import Image
 import random
 import os
+import imutils
+from ellipse import ellipserotate
+import cv2 as cv
 
 #--------------------------------------#
 #   according to the paper 
@@ -19,7 +22,8 @@ def file_filter(f):
     else:
         return False
 #--------------------------------------#
-# from xc yc w h, to x y x y, left-top to right-bottom
+#   from xc yc w h, 
+#   to x y x y, left-top to right-bottom
 #--------------------------------------#
 def convert(img_width, img_height, box):
     x_min = (float(box[1]) - float(box[3])/2.0)*img_width
@@ -28,7 +32,8 @@ def convert(img_width, img_height, box):
     y_max = (float(box[2]) + float(box[4])/2.0)*img_height
     return (int(x_min),int(y_min),int(x_max),int(y_max))
 #--------------------------------------#
-# from x y x y, left-top to right-bottom to xc yc w h
+#   from x y x y, left-top 
+#   to right-bottom to xc yc w h
 #--------------------------------------#
 def convert_2yolo(img_width, img_height, box):
     x_center = ((float(box[2]) + float(box[0]))/2.0)/img_width
@@ -36,7 +41,9 @@ def convert_2yolo(img_width, img_height, box):
     x_width = (float(box[2]) - float(box[0]))/img_width
     y_height = (float(box[3]) - float(box[1]))/img_height
     return (x_center,y_center,x_width,y_height)
-
+#--------------------------------------#
+#   get the target box, in xy xy form
+#--------------------------------------#
 def get_box(annotation_path, img_width, img_height):
     with open(annotation_path) as f:
         box_list = []
@@ -47,7 +54,9 @@ def get_box(annotation_path, img_width, img_height):
             box_list.append(box)
             classes_list.append(int(line[0]))
     return box_list,classes_list
-
+#-----------------------------------------#
+#   crop the targets randomly from 3 pictures
+#-----------------------------------------#
 def crop_from_img(images,rd):
     img_seed_1 = random.choice(images)
     img_seed_2 = random.choice(images)
@@ -84,7 +93,9 @@ def crop_from_img(images,rd):
         all_classes.append(seed_classes_list_3[index])
         all_patches.append(img_patch_3)
     return all_boxes,all_classes,all_patches
-
+#---------------------------------------------#
+#   to find out if the point in the boxes
+#---------------------------------------------#
 def ifinbox(x,y,boxes):
     for index,box in enumerate(boxes):
         if box[0]<x<box[2] and box[1]<y<box[3]:
@@ -113,14 +124,45 @@ def implement_copy_paste(images,rd,save_path):
                 scale = np.random.rand(2)
                 x_position = int(img_w*scale[0])
                 y_position = int(img_h*scale[1])
-            patch_width = seed_boxes[index][2]-seed_boxes[index][0]
-            patch_height = seed_boxes[index][3]-seed_boxes[index][1]
+            #-----------------------------#
+            #   set the rotation angle randomly
+            #   if dont want rotation set angle to 0
+            #-----------------------------#
+            angle = (np.random.rand()-0.5)*40
+            #-----------------------------#
+            #   expand the picture channels to rgba
+            #   include transparent channel
+            #   that's the alpha channel
+            #-----------------------------#
+            seed_patch = seed_patch.convert('RGBA')
+            img = img.convert('RGBA')
+            #-----------------------------#
+            #   get the rotated patch
+            #-----------------------------#
+            seed_patch_rotation = seed_patch.rotate(angle,expand = True)
+            #-----------------------------#
+            #   get the rotated box
+            #   use ellipss methode
+            #-----------------------------#
+            b_H = seed_boxes[index][3] - seed_boxes[index][1]
+            b_W = seed_boxes[index][2] - seed_boxes[index][0]
+            y_c = (seed_boxes[index][3] + seed_boxes[index][1])/2
+            x_c = (seed_boxes[index][2] + seed_boxes[index][0])/2
+            x_min,y_min,x_max,y_max = ellipserotate(-angle,b_H,b_W,x_c,y_c,x_c,y_c)
+            patch_width, patch_height = seed_patch_rotation.size 
+            patch_width_write = int(x_max-x_min)
+            patch_height_write = int(y_max-y_min)
             paste_box = (x_position,y_position,x_position+patch_width,y_position+patch_height)
-            paste_boxes.append(paste_box)
-            img.paste(seed_patch, paste_box)
+            box_cx = x_position + patch_width/2
+            box_cy = y_position + patch_height/2
+            paste_box_write = (box_cx-patch_width_write/2,box_cy-patch_height_write/2,\
+                box_cx+patch_width_write/2,box_cy+patch_height_write/2)
+            img.paste(seed_patch_rotation, paste_box,seed_patch_rotation)
+            paste_boxes.append(paste_box_write)
         all_boxes = paste_boxes+root_box_list
         all_classes = seed_classes+root_classes_list
         img_path = save_path+ image[:-4]+'copy'+'.jpg'
+        img = img.convert('RGB')
         img.save(img_path)
         for index,all_box in enumerate(all_boxes):
             x_center,y_center,x_width,y_height = convert_2yolo(img_w, img_h, all_box)
@@ -128,15 +170,4 @@ def implement_copy_paste(images,rd,save_path):
             txt_path = img_path[:-3]+'txt'
             with open(txt_path,'w') as f:
                 f.write(annotation)
-'''
-if __name__ == '__main__':
-    np.random.seed(100000)
-    rd = 'test/'
-    paths = os.listdir(rd)
-    images = list(filter(file_filter, paths))
-    save_path = 'save/'
-    if not os.path.exists(save_path):
-        os.mkdir(save_path)
-    implement_copy_paste(images,rd,save_path)
-'''
 

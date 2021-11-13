@@ -1,4 +1,4 @@
-from copy_paste import implement_copy_paste,file_filter
+from copy_paste_with_rotation import implement_copy_paste,file_filter
 import os
 import numpy as np
 
